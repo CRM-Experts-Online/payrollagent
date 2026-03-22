@@ -1,0 +1,464 @@
+{
+  "name": "Zoho Bookings Intelligence Monitor",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "2,17,32,47 * * * *"
+            }
+          ]
+        }
+      },
+      "id": "a1000001-0000-4000-8000-000000000001",
+      "name": "Every 15 Minutes",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.1,
+      "position": [0, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "/*\n  LOAD STATE FROM N8N STATIC DATA\n  Static data persists between workflow runs in n8n's database.\n  No external file needed — works on any platform.\n*/\nconst sd = $getWorkflowStaticData('global');\n\n// First-run seed: mark historical bookings so we don't re-alert on them\nif (!sd.processed) {\n  sd.processed = {};\n  const historical = [\n    'CR-00304','CR-00305','CR-00306','CR-00311','CR-00313','CR-00314',\n    'CR-00315','CR-00316','CR-00318','CR-00319','CR-00321','CR-00323',\n    'CR-00324','CR-00325','CR-00326','CR-00327','CR-00328','CR-00329',\n    'CR-00330','CR-00331','CR-00332','US-315544'\n  ];\n  for (const id of historical) {\n    sd.processed[id] = {\n      bookingId: id,\n      trigger: 'PRE_EXISTING',\n      emailSent: new Date().toISOString(),\n      classification: 'Historical',\n      score: 0,\n      lastUpdated: new Date().toISOString()\n    };\n  }\n}\n\n// Compute time windows\nconst now = new Date();\nreturn [{\n  json: {\n    nowISO:  now.toISOString(),\n    minus35: new Date(now.getTime() -  35 * 60 * 1000).toISOString(),\n    minus2h: new Date(now.getTime() -   2 * 60 * 60 * 1000).toISOString(),\n    plus72h: new Date(now.getTime() +  72 * 60 * 60 * 1000).toISOString(),\n    state:   JSON.parse(JSON.stringify(sd.processed))\n  }\n}];"
+      },
+      "id": "a1000001-0000-4000-8000-000000000002",
+      "name": "Load State",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [200, 300]
+    },
+    {
+      "parameters": {
+        "resource": "event",
+        "operation": "getAll",
+        "calendar": {
+          "__rl": true,
+          "value": "primary",
+          "mode": "list",
+          "cachedResultName": "primary"
+        },
+        "returnAll": false,
+        "limit": 50,
+        "options": {
+          "timeMin": "={{ $('Load State').first().json.minus35 }}",
+          "timeMax": "={{ $('Load State').first().json.nowISO }}",
+          "singleEvents": true
+        }
+      },
+      "id": "a1000001-0000-4000-8000-000000000003",
+      "name": "Calendar Query A (Recent 35m)",
+      "type": "n8n-nodes-base.googleCalendar",
+      "typeVersion": 1.1,
+      "position": [420, 160],
+      "credentials": {
+        "googleCalendarOAuth2Api": {
+          "id": "REPLACE_WITH_YOUR_GCAL_CREDENTIAL_ID",
+          "name": "Google Calendar"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "resource": "event",
+        "operation": "getAll",
+        "calendar": {
+          "__rl": true,
+          "value": "primary",
+          "mode": "list",
+          "cachedResultName": "primary"
+        },
+        "returnAll": false,
+        "limit": 25,
+        "options": {
+          "q": "Booking ID",
+          "timeMin": "={{ $('Load State').first().json.minus2h }}",
+          "timeMax": "={{ $('Load State').first().json.plus72h }}",
+          "singleEvents": true
+        }
+      },
+      "id": "a1000001-0000-4000-8000-000000000004",
+      "name": "Calendar Query B (Booking ID +72h)",
+      "type": "n8n-nodes-base.googleCalendar",
+      "typeVersion": 1.1,
+      "position": [420, 440],
+      "credentials": {
+        "googleCalendarOAuth2Api": {
+          "id": "REPLACE_WITH_YOUR_GCAL_CREDENTIAL_ID",
+          "name": "Google Calendar"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "append"
+      },
+      "id": "a1000001-0000-4000-8000-000000000005",
+      "name": "Merge Calendar Results",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 2.1,
+      "position": [640, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "/*\n  PARSE, FILTER, AND DEDUP ZOHO BOOKINGS EVENTS\n  - Deduplicates merged calendar results by event ID\n  - Filters to Zoho Bookings events only\n  - Parses all fields from the structured description\n  - Checks Meet link presence\n  - Performs deduplication against saved state\n  - Returns all Zoho events (with trigger=null for already-processed ones)\n*/\nconst state = $('Load State').first().json.state;\n\nfunction parseField(desc, field) {\n  const rx = new RegExp(field + '\\\\s*:\\\\s*([^\\\\n\\\\r]+)', 'i');\n  const m = (desc || '').match(rx);\n  return m ? m[1].trim() : '';\n}\n\n// Deduplicate by event ID across both calendar query results\nconst seen = new Set();\nconst allEvents = [];\nfor (const item of $input.all()) {\n  const ev = item.json;\n  if (!ev || !ev.id || seen.has(ev.id)) continue;\n  seen.add(ev.id);\n  allEvents.push(ev);\n}\n\n// Keep only Zoho Bookings events\nconst zohoEvents = allEvents.filter(ev => {\n  const d = ev.description || '';\n  return d.includes('Booking ID') || d.includes('Customer Info') ||\n         d.includes('Service Info') || d.includes('Service Name');\n});\n\nif (zohoEvents.length === 0) return [];\n\nconst results = [];\nfor (const ev of zohoEvents) {\n  const desc = ev.description || '';\n  const bookingId  = parseField(desc, 'Booking ID');\n  const email      = parseField(desc, 'Email');\n  const startTime  = ev.start?.dateTime || ev.start?.date || '';\n  const key        = bookingId || (ev.id + '_' + email + '_' + startTime);\n\n  // Detect existing Meet link\n  const hangoutLink = ev.hangoutLink || null;\n  const confPoints  = (ev.conferenceData?.entryPoints || []);\n  const confMeet    = confPoints.find(e => (e.uri || '').includes('meet.google.com'));\n  const locMeet     = (ev.location || '').includes('meet.google.com');\n  const hasMeet     = !!(hangoutLink || confMeet || locMeet);\n  const meetLink    = hangoutLink || confMeet?.uri || null;\n\n  // Deduplication check\n  const existing = state[key];\n  let trigger = null;\n  if (!existing) {\n    trigger = 'NEW';\n  } else {\n    const lastTs    = new Date(existing.lastUpdated || existing.emailSent || 0).getTime();\n    const updatedTs = new Date(ev.updated || 0).getTime();\n    if ((updatedTs - lastTs) > 5 * 60 * 1000) trigger = 'UPDATED';\n  }\n\n  results.push({ json: {\n    eventId:       ev.id,\n    key,\n    bookingId,\n    trigger,\n    hasMeet,\n    meetLink,\n    meetLinkAdded: false,\n    name:         parseField(desc, 'Name'),\n    email,\n    phone:        parseField(desc, 'Contact Number'),\n    company:      parseField(desc, 'Company Name'),\n    website:      parseField(desc, 'Website'),\n    serviceName:  parseField(desc, 'Service Name'),\n    subject:      parseField(desc, 'Subject'),\n    startTime,\n    updatedAt:    ev.updated || '',\n    processedAt:  new Date().toISOString()\n  }});\n}\n\nreturn results;"
+      },
+      "id": "a1000001-0000-4000-8000-000000000006",
+      "name": "Parse and Dedup",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [860, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "cond-hasmeet",
+              "leftValue": "={{ $json.hasMeet }}",
+              "rightValue": false,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "id": "a1000001-0000-4000-8000-000000000007",
+      "name": "Needs Meet Link?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1080, 300]
+    },
+    {
+      "parameters": {
+        "method": "PATCH",
+        "url": "=https://www.googleapis.com/calendar/v3/calendars/primary/events/{{ $json.eventId }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "googleCalendarOAuth2Api",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "conferenceDataVersion",
+              "value": "1"
+            }
+          ]
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ conferenceData: { createRequest: { conferenceSolutionKey: { type: 'hangoutsMeet' }, requestId: $json.bookingId + '-meet-' + Math.random().toString(36).substr(2,6) } } }) }}",
+        "options": {}
+      },
+      "id": "a1000001-0000-4000-8000-000000000008",
+      "name": "Add Google Meet Link",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [1300, 160],
+      "credentials": {
+        "googleCalendarOAuth2Api": {
+          "id": "REPLACE_WITH_YOUR_GCAL_CREDENTIAL_ID",
+          "name": "Google Calendar"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "/*\n  Extract the new Meet link from the Calendar API response\n  and merge it back with the original booking data.\n  $('Needs Meet Link?').item.json gives us the paired input item.\n*/\nconst apiResponse = $input.first().json;\nconst booking    = $('Needs Meet Link?').item.json;\n\nconst meetLink =\n  apiResponse.hangoutLink ||\n  (apiResponse.conferenceData?.entryPoints || [])\n    .find(e => e.entryPointType === 'video')?.uri ||\n  null;\n\nreturn [{ json: { ...booking, meetLink, meetLinkAdded: !!meetLink, hasMeet: true } }];"
+      },
+      "id": "a1000001-0000-4000-8000-000000000009",
+      "name": "Extract Meet Link",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1520, 160]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Already has a Meet link — pass through unchanged\nreturn [{ json: { ...$input.first().json, meetLinkAdded: false } }];"
+      },
+      "id": "a1000001-0000-4000-8000-000000000010",
+      "name": "Pass Through (Has Meet)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1300, 440]
+    },
+    {
+      "parameters": {
+        "mode": "append"
+      },
+      "id": "a1000001-0000-4000-8000-000000000011",
+      "name": "Merge After Meet Check",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 2.1,
+      "position": [1740, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "cond-trigger",
+              "leftValue": "={{ $json.trigger }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notEquals"
+              }
+            },
+            {
+              "id": "cond-trigger-notnull",
+              "leftValue": "={{ $json.trigger }}",
+              "rightValue": "null",
+              "operator": {
+                "type": "string",
+                "operation": "notEquals"
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "id": "a1000001-0000-4000-8000-000000000012",
+      "name": "New or Updated?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1960, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.anthropic.com/v1/messages",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-api-key",
+              "value": "REPLACE_WITH_YOUR_ANTHROPIC_API_KEY"
+            },
+            {
+              "name": "anthropic-version",
+              "value": "2023-06-01"
+            },
+            {
+              "name": "content-type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({\n  model: 'claude-opus-4-5',\n  max_tokens: 4096,\n  messages: [{\n    role: 'user',\n    content: 'You are a CRM sales intelligence analyst for CRM Experts Online. Analyze this Zoho Bookings event and return ONLY valid JSON — no markdown, no backticks, no commentary.\\n\\nBOOKING DATA:\\nName: ' + $json.name + '\\nEmail: ' + $json.email + '\\nPhone: ' + $json.phone + '\\nCompany: ' + $json.company + '\\nWebsite: ' + $json.website + '\\nBooking ID: ' + $json.bookingId + '\\nService: ' + $json.serviceName + '\\nMeeting Time: ' + $json.startTime + '\\nNotes/Subject: ' + ($json.subject || 'None') + '\\nGoogle Meet Link: ' + ($json.meetLink || 'None') + '\\nTrigger: ' + $json.trigger + '\\n\\nSCORING RULES (start at 5):\\n+2 real company website and appears established\\n+2 tech/SaaS/CRM/ERP/services industry\\n+1 company appears to have 10+ employees\\n+1 international (non-US) booking\\n-1 personal email (gmail/yahoo/hotmail/outlook/icloud) with no company\\n-2 no website found\\n-3 spam or bot signals\\n\\nCLASSIFICATION:\\nProspect = business email matches company + CRM/ERP/sales inquiry service\\nCandidate = personal email + service is job/role/hiring related\\nExisting Client = company or email matches known CRM Experts account\\nPartner/Vendor = tech company, agency, reseller, or software vendor\\nUnknown = insufficient data to classify\\nSpam = fake company, disposable email, no website, incoherent data\\n\\nReturn this exact JSON structure:\\n{\\n  \"classification\": \"Prospect|Candidate|Existing Client|Partner/Vendor|Unknown|Spam\",\\n  \"score\": 7,\\n  \"executiveSummary\": \"2-3 sentences: who are they, what do they do, why did they book, is this call worth taking?\",\\n  \"companyDescription\": \"1-2 sentences about the company based on domain/name/context\",\\n  \"companyIndustry\": \"industry\",\\n  \"companySize\": \"estimated headcount or Unknown\",\\n  \"personRole\": \"estimated role or Unknown\",\\n  \"whyBooked\": \"1-2 sentences connecting their service choice + company type + any signals\",\\n  \"callRecommendation\": \"YES|MAYBE|NO\",\\n  \"callReason\": \"1-2 sentence justification\",\\n  \"meetingPriority\": \"HIGH|MEDIUM|LOW\",\\n  \"priorityRationale\": \"brief rationale\",\\n  \"redFlags\": [\"flag 1\", \"flag 2\"],\\n  \"nextActions\": [\"1. Specific action\", \"2. Specific action\", \"3. Specific action\"],\\n  \"classificationConfidence\": \"HIGH|MEDIUM|LOW\",\\n  \"confidenceNotes\": \"what is confirmed vs inferred\",\\n  \"emailSubject\": \"New Booking: NAME | COMPANY | Score: X/10 | CLASSIFICATION\",\\n  \"emailHTML\": \"COMPLETE HTML EMAIL — see style requirements below\"\\n}\\n\\nFor emailHTML generate a COMPLETE standalone HTML email with inline CSS only. Include:\\n- Full <html><head><body> structure\\n- Dark header bar (#1a1a2e) white text 24px: New Booking Alert\\n- Subheader with booking ID and timestamp\\n- Color-coded classification badge: Prospect=green(#27ae60), Partner/Vendor=blue(#2980b9), Candidate=orange(#e67e22), Spam=red(#c0392b), Unknown=gray(#7f8c8d), Existing Client=purple(#8e44ad)\\n- Score badge: 8-10=green, 5-7=orange, 1-4=red background\\n- Section 1: Executive Summary\\n- Section 2: Classification + Score (badges)\\n- Section 3: Contact Details table (Name/Email/Phone/Company/Website/Booking ID/Service/Meeting Time/Google Meet Link rows)\\n- Section 4: Company Intelligence (description/industry/size/role)\\n- Section 5: Why They Likely Booked\\n- Section 6: Call Recommendation (YES/MAYBE/NO with color) + reason\\n- Section 7: Meeting Priority (HIGH/MEDIUM/LOW) + rationale\\n- Section 8: Red Flags (bullet list or None identified)\\n- Section 9: Recommended Next Actions (numbered)\\n- Section 10: Confidence Assessment\\n- Section 11: Footer with: Booking Key: KEY | Trigger: TRIGGER | Processed: TIMESTAMP | Meet Link Added: YES/NO | Apollo API: Not configured — add ANTHROPIC_API_KEY and APOLLO_API_KEY to n8n credentials | Automated by: Zoho Bookings Intelligence Monitor (n8n)\\n- Use max-width 680px centered layout, white card on light gray background, clean sans-serif font'\n  }]\n}) }}"
+        ,
+        "options": {}
+      },
+      "id": "a1000001-0000-4000-8000-000000000013",
+      "name": "Claude Intelligence API",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [2180, 160]
+    },
+    {
+      "parameters": {
+        "jsCode": "/*\n  Parse Claude API response.\n  Claude returns: { content: [{ type: 'text', text: '{ JSON here }' }] }\n  Strip any accidental markdown code fences before parsing.\n*/\nconst apiResp  = $input.first().json;\nconst booking  = $('New or Updated?').item.json;\n\nlet analysis = {};\ntry {\n  let raw = apiResp.content?.[0]?.text || '{}';\n  // Strip markdown fences if Claude wrapped the JSON\n  raw = raw.replace(/^```(?:json)?\\n?/i, '').replace(/\\n?```$/i, '').trim();\n  analysis = JSON.parse(raw);\n} catch (e) {\n  console.error('Claude parse error:', e.message);\n  analysis = {\n    classification:  'Unknown',\n    score:           5,\n    executiveSummary: 'Booking received. Claude parsing failed — review manually.',\n    emailSubject:    `New Booking: ${booking.name} | ${booking.company} | Score: ?/10 | Unknown`,\n    emailHTML:       `<html><body style=\"font-family:Arial,sans-serif;padding:20px\">\n      <h2 style=\"color:#1a1a2e\">New Booking Alert</h2>\n      <p><strong>Name:</strong> ${booking.name}</p>\n      <p><strong>Company:</strong> ${booking.company}</p>\n      <p><strong>Email:</strong> ${booking.email}</p>\n      <p><strong>Service:</strong> ${booking.serviceName}</p>\n      <p><strong>Booking ID:</strong> ${booking.bookingId}</p>\n      <p><strong>Meeting:</strong> ${booking.startTime}</p>\n      <p><em>Intelligence enrichment unavailable — Claude API parsing error. Review manually.</em></p>\n    </body></html>`\n  };\n}\n\nreturn [{ json: { ...booking, ...analysis } }];"
+      },
+      "id": "a1000001-0000-4000-8000-000000000014",
+      "name": "Parse Claude Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2400, 160]
+    },
+    {
+      "parameters": {
+        "fromEmail": "jperez@service-push.com",
+        "toEmail": "jperez@service-push.com",
+        "subject": "={{ $json.emailSubject }}",
+        "emailType": "html",
+        "message": "={{ $json.emailHTML }}",
+        "options": {}
+      },
+      "id": "a1000001-0000-4000-8000-000000000015",
+      "name": "Send Briefing Email",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [2620, 160],
+      "credentials": {
+        "smtp": {
+          "id": "REPLACE_WITH_YOUR_SMTP_CREDENTIAL_ID",
+          "name": "Gmail SMTP"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "/*\n  UPDATE STATE IN N8N STATIC DATA\n  We write only the single new key — existing keys are preserved\n  because we hold a reference to the same sd.processed object.\n*/\nconst sd = $getWorkflowStaticData('global');\nif (!sd.processed) sd.processed = {};\n\nconst item = $input.first().json;\nconst key  = item.key;\n\nsd.processed[key] = {\n  eventId:        item.eventId,\n  bookingId:      item.bookingId,\n  name:           item.name,\n  email:          item.email,\n  company:        item.company,\n  lastUpdated:    item.updatedAt || new Date().toISOString(),\n  emailSent:      new Date().toISOString(),\n  classification: item.classification || 'Unknown',\n  score:          item.score || 5,\n  trigger:        item.trigger,\n  meetLink:       item.meetLink || null,\n  meetLinkAdded:  item.meetLinkAdded || false\n};\n\nconsole.log('[ZohoMonitor] State updated — key:', key, '| classification:', sd.processed[key].classification);\n\nreturn [{ json: {\n  success:        true,\n  key,\n  name:           item.name,\n  classification: sd.processed[key].classification,\n  score:          sd.processed[key].score,\n  emailSent:      sd.processed[key].emailSent\n}}];"
+      },
+      "id": "a1000001-0000-4000-8000-000000000016",
+      "name": "Update State",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2840, 160]
+    },
+    {
+      "parameters": {},
+      "id": "a1000001-0000-4000-8000-000000000017",
+      "name": "No Action (Already Processed)",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [2180, 440]
+    }
+  ],
+  "connections": {
+    "Every 15 Minutes": {
+      "main": [
+        [
+          { "node": "Load State", "type": "main", "index": 0 }
+        ]
+      ]
+    },
+    "Load State": {
+      "main": [
+        [
+          { "node": "Calendar Query A (Recent 35m)",       "type": "main", "index": 0 },
+          { "node": "Calendar Query B (Booking ID +72h)", "type": "main", "index": 0 }
+        ]
+      ]
+    },
+    "Calendar Query A (Recent 35m)": {
+      "main": [
+        [
+          { "node": "Merge Calendar Results", "type": "main", "index": 0 }
+        ]
+      ]
+    },
+    "Calendar Query B (Booking ID +72h)": {
+      "main": [
+        [
+          { "node": "Merge Calendar Results", "type": "main", "index": 1 }
+        ]
+      ]
+    },
+    "Merge Calendar Results": {
+      "main": [
+        [
+          { "node": "Parse and Dedup", "type": "main", "index": 0 }
+        ]
+      ]
+    },
+    "Parse and Dedup": {
+      "main": [
+        [
+          { "node": "Needs Meet Link?", "type": "main", "index": 0 }
+        ]
+      ]
+    },
+    "Needs Meet Link?": {
+      "main": [
+        [
+          { "node": "Add Google Meet Link",   "type": "main", "index": 0 }
+        ],
+        [
+          { "node": "Pass Through (Has Meet)", "type": "main", "index": 0 }
+        ]
+      ]
+    },
+    "Add Google Meet Link": {
+      "main": [
+        [
+          { "node": "Extract Meet Link", "type": "main", "index": 0 }
+        ]
+      ]
+    },
+    "Extract Meet Link": {
+      "main": [
+        [
+          { "node": "Merge After Meet Check", "type": "main", "index": 0 }
+        ]
+      ]
+    },
+    "Pass Through (Has Meet)": {
+      "main": [
+        [
+          { "node": "Merge After Meet Check", "type": "main", "index": 1 }
+        ]
+      ]
+    },
+    "Merge After Meet Check": {
+      "main": [
+        [
+          { "node": "New or Updated?", "type": "main", "index": 0 }
+        ]
+      ]
+    },
+    "New or Updated?": {
+      "main": [
+        [
+          { "node": "Claude Intelligence API",       "type": "main", "index": 0 }
+        ],
+        [
+          { "node": "No Action (Already Processed)", "type": "main", "index": 0 }
+        ]
+      ]
+    },
+    "Claude Intelligence API": {
+      "main": [
+        [
+          { "node": "Parse Claude Response", "type": "main", "index": 0 }
+        ]
+      ]
+    },
+    "Parse Claude Response": {
+      "main": [
+        [
+          { "node": "Send Briefing Email", "type": "main", "index": 0 }
+        ]
+      ]
+    },
+    "Send Briefing Email": {
+      "main": [
+        [
+          { "node": "Update State", "type": "main", "index": 0 }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "saveManualExecutions": true,
+    "callerPolicy": "workflowsFromSameOwner",
+    "errorWorkflow": ""
+  },
+  "staticData": null,
+  "tags": [
+    {
+      "name": "Bookings"
+    },
+    {
+      "name": "CRM"
+    }
+  ],
+  "triggerCount": 1,
+  "updatedAt": "2026-03-22T00:00:00.000Z",
+  "versionId": "zoho-monitor-v1"
+}
