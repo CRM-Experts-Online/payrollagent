@@ -17,17 +17,24 @@
     },
     {
       "parameters": {
-        "resource": "fileFolder",
-        "operation": "search",
-        "queryString": "name contains '7 Day Recap'",
-        "returnAll": false,
-        "limit": 10,
+        "url": "https://www.googleapis.com/drive/v3/files",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "googleDriveOAuth2Api",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            { "name": "q", "value": "name contains '7 Day Recap' and trashed = false" },
+            { "name": "orderBy", "value": "modifiedTime desc" },
+            { "name": "pageSize", "value": "10" },
+            { "name": "fields", "value": "files(id,name,modifiedTime,createdTime,webViewLink)" }
+          ]
+        },
         "options": {}
       },
       "id": "b2000001-0000-4000-8000-000000000002",
       "name": "Search Google Drive",
-      "type": "n8n-nodes-base.googleDrive",
-      "typeVersion": 3,
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
       "position": [240, 300],
       "credentials": {
         "googleDriveOAuth2Api": {
@@ -38,7 +45,7 @@
     },
     {
       "parameters": {
-        "jsCode": "// Sort files by modifiedTime descending and return the most recent one\nconst files = items.map(i => i.json);\nif (files.length === 0) {\n  throw new Error('No 7 Day Recap files found in Google Drive');\n}\nfiles.sort((a, b) => {\n  const ta = new Date(b.modifiedTime || b.createdTime || 0).getTime();\n  const tb = new Date(a.modifiedTime || a.createdTime || 0).getTime();\n  return ta - tb;\n});\nreturn [{ json: files[0] }];"
+        "jsCode": "// Response is { files: [...] } from the Drive API\nconst files = $input.first().json.files || [];\nif (files.length === 0) {\n  throw new Error('No 7 Day Recap files found in Google Drive');\n}\n// Already ordered by modifiedTime desc from the API, so just take first\nreturn [{ json: files[0] }];"
       },
       "id": "b2000001-0000-4000-8000-000000000003",
       "name": "Sort and Pick Most Recent",
