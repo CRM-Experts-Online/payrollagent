@@ -19,7 +19,7 @@
       "parameters": {
         "resource": "fileFolder",
         "operation": "search",
-        "queryString": "name contains '7 Day Recap' and mimeType='application/vnd.google-apps.document'",
+        "queryString": "name contains '7 Day Recap'",
         "returnAll": false,
         "limit": 10,
         "options": {}
