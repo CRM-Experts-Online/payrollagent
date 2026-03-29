@@ -26,7 +26,10 @@
             { "name": "q", "value": "name contains '7 Day Recap' and trashed = false" },
             { "name": "orderBy", "value": "modifiedTime desc" },
             { "name": "pageSize", "value": "10" },
-            { "name": "fields", "value": "files(id,name,modifiedTime,createdTime,webViewLink)" }
+            { "name": "fields", "value": "files(id,name,modifiedTime,createdTime,webViewLink)" },
+            { "name": "includeItemsFromAllDrives", "value": "true" },
+            { "name": "supportsAllDrives", "value": "true" },
+            { "name": "corpora", "value": "allDrives" }
           ]
         },
         "options": {}
@@ -45,7 +48,7 @@
     },
     {
       "parameters": {
-        "jsCode": "// Response is { files: [...] } from the Drive API\nconst files = $input.first().json.files || [];\nif (files.length === 0) {\n  throw new Error('No 7 Day Recap files found in Google Drive');\n}\n// Already ordered by modifiedTime desc from the API, so just take first\nreturn [{ json: files[0] }];"
+        "jsCode": "// Response is { files: [...] } from the Drive API\nconst raw = $input.first().json;\nconst files = raw.files || [];\nif (files.length === 0) {\n  // Return the raw response so you can see what came back\n  throw new Error('No files found. Raw API response: ' + JSON.stringify(raw));\n}\n// Already ordered by modifiedTime desc from the API, so just take first\nreturn [{ json: files[0] }];"
       },
       "id": "b2000001-0000-4000-8000-000000000003",
       "name": "Sort and Pick Most Recent",
