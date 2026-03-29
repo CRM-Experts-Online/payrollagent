@@ -12,10 +12,7 @@
       "name": "Webhook",
       "type": "n8n-nodes-base.webhook",
       "typeVersion": 2,
-      "position": [
-        0,
-        300
-      ],
+      "position": [0, 300],
       "webhookId": "weekly-ops-dashboard"
     },
     {
@@ -26,34 +23,13 @@
         "sendQuery": true,
         "queryParameters": {
           "parameters": [
-            {
-              "name": "q",
-              "value": "name contains '7 Day Recap' and trashed = false"
-            },
-            {
-              "name": "orderBy",
-              "value": "modifiedTime desc"
-            },
-            {
-              "name": "pageSize",
-              "value": "10"
-            },
-            {
-              "name": "fields",
-              "value": "files(id,name,modifiedTime,createdTime,webViewLink)"
-            },
-            {
-              "name": "includeItemsFromAllDrives",
-              "value": "true"
-            },
-            {
-              "name": "supportsAllDrives",
-              "value": "true"
-            },
-            {
-              "name": "corpora",
-              "value": "allDrives"
-            }
+            { "name": "q", "value": "name contains '7 Day Recap' and trashed = false" },
+            { "name": "orderBy", "value": "modifiedTime desc" },
+            { "name": "pageSize", "value": "10" },
+            { "name": "fields", "value": "files(id,name,modifiedTime,createdTime,webViewLink)" },
+            { "name": "includeItemsFromAllDrives", "value": "true" },
+            { "name": "supportsAllDrives", "value": "true" },
+            { "name": "corpora", "value": "allDrives" }
           ]
         },
         "options": {}
@@ -62,10 +38,7 @@
       "name": "Search Google Drive",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [
-        240,
-        300
-      ],
+      "position": [240, 300],
       "credentials": {
         "googleDriveOAuth2Api": {
           "id": "REPLACE_WITH_YOUR_GDRIVE_CREDENTIAL_ID",
@@ -75,16 +48,13 @@
     },
     {
       "parameters": {
-        "jsCode": "// Response is { files: [...] } from the Drive API\nconst raw = $input.first().json;\nconst files = raw.files || [];\nif (files.length === 0) {\n  // Return the raw response so you can see what came back\n  throw new Error('No files found. Raw API response: ' + JSON.stringify(raw));\n}\n// Already ordered by modifiedTime desc from the API, so just take first\nreturn [{ json: files[0] }];"
+        "jsCode": "var raw = $input.first().json;\nvar files = raw.files || [];\nif (files.length === 0) {\n  throw new Error('No files found. Raw API response: ' + JSON.stringify(raw));\n}\nreturn [{ json: files[0] }];"
       },
       "id": "b2000001-0000-4000-8000-000000000003",
       "name": "Sort and Pick Most Recent",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [
-        480,
-        300
-      ]
+      "position": [480, 300]
     },
     {
       "parameters": {
@@ -103,10 +73,7 @@
       "name": "Export Doc as Plain Text",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [
-        720,
-        300
-      ],
+      "position": [720, 300],
       "credentials": {
         "googleDriveOAuth2Api": {
           "id": "REPLACE_WITH_YOUR_GDRIVE_CREDENTIAL_ID",
@@ -116,16 +83,47 @@
     },
     {
       "parameters": {
-        "jsCode": "var rawText = $input.first().json.data || '';\nvar info = $('Sort and Pick Most Recent').first().json;\n\nfunction esc(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }\n\n// Line-by-line parser — handles Google Docs plain text single-newline format\nfunction parseDoc(raw){\n  var lines = raw.replace(/\\r/g,'').split('\\n');\n  var sections = [];\n  var cur = null;\n  for(var i=0;i<lines.length;i++){\n    var line = lines[i];\n    var t = line.trim();\n    if(!t) continue;\n    var prevBlank = i===0 || !lines[i-1].trim();\n    var isBullet = /^[•*\\-]/.test(t);\n    var isShort = t.length < 90;\n    var noEndPunct = !/[.!?]$/.test(t);\n    var isTitle = !isBullet && prevBlank && isShort && noEndPunct;\n    if(isTitle){\n      if(cur) sections.push(cur);\n      cur = {title:t, items:[]};\n    } else if(cur){\n      var stripped = t.replace(/^[•*\\-]\\s*/,'');\n      if(stripped){\n        var isIndented = /^\\s{4,}/.test(line);\n        var isAction = /action item|assigned to|pending|urgent|blocked|due:|follow.up|must:/i.test(stripped);\n        cur.items.push({text:stripped, sub:isIndented, action:isAction});\n      }\n    }\n  }\n  if(cur) sections.push(cur);\n  return sections.filter(function(s){ return s.title.length > 1; });\n}\n\nfunction cat(t){\n  var l = t.toLowerCase();\n  if(/jaguar|lewis|fordham|canvas forum|nett.?sol|jon hart|titan|spears|guac|certitrek|cfg|albert|ground up/.test(l)) return 'cl';\n  if(/daria|hesham|jasmin|david smith|devoreaux|agustin|chareze|lorenna|princess|gwen/.test(l)) return 'tm';\n  if(/crm copilot|ai website|custom gpt|website change/.test(l)) return 'pr';\n  return 'op';\n}\n\nvar CAT = {\n  cl: {label:'Client',  color:'#3b82f6', bg:'rgba(59,130,246,0.12)',  icon:'&#x1F3E2;'},\n  tm: {label:'Team',    color:'#a855f7', bg:'rgba(168,85,247,0.12)',  icon:'&#x1F465;'},\n  pr: {label:'Product', color:'#10b981', bg:'rgba(16,185,129,0.12)',  icon:'&#x1F916;'},\n  op: {label:'Ops',     color:'#f59e0b', bg:'rgba(245,158,11,0.12)',  icon:'&#x2699;'}\n};\n\nvar sections = parseDoc(rawText);\nvar d = new Date(info.modifiedTime || info.createdTime || Date.now());\nvar dateStr = d.toLocaleDateString('en-US',{weekday:'long',month:'long',day:'numeric',year:'numeric'});\nvar timeStr = d.toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',timeZoneName:'short'});\nvar total   = sections.length;\nvar actions = sections.reduce(function(n,s){return n+s.items.filter(function(i){return i.action;}).length;},0);\nvar clients = sections.filter(function(s){return cat(s.title)==='cl';}).length;\nvar team    = sections.filter(function(s){return cat(s.title)==='tm';}).length;\nvar product = sections.filter(function(s){return cat(s.title)==='pr';}).length;\nvar ops     = sections.filter(function(s){return cat(s.title)==='op';}).length;\nvar docLink = esc(info.webViewLink || '#');\n\nfunction renderCard(s){\n  var c = cat(s.title);\n  var m = CAT[c];\n  var ac = s.items.filter(function(i){return i.action;}).length;\n  var items = s.items.map(function(item){\n    var txt = esc(item.text);\n    if(/^[A-Z][A-Za-z &()]{2,50}:\\s/.test(item.text)){\n      txt = txt.replace(/^([^:]{2,55}:\\s)/,'<b>$1</b>');\n    }\n    var cls = 'bi'+(item.sub?' bs':'')+(item.action?' ba':'');\n    return '<li class=\"'+cls+'\">'+txt+'</li>';\n  }).join('');\n  return '<div class=\"card\" data-c=\"'+c+'\" style=\"--ac:'+m.color+';--ab:'+m.bg+'\">' \n    +'<div class=\"ch\" style=\"border-top:3px solid '+m.color+'\">'\n      +'<div class=\"cr\"><h3 class=\"ct\">'+esc(s.title)+'</h3>'\n      +'<span class=\"badge\" style=\"background:'+m.bg+';color:'+m.color+'\">'+m.icon+' '+m.label+'</span></div>'\n      +(ac>0?'<div class=\"arow\"><span class=\"adot\"></span>'+ac+' action item'+(ac!==1?'s':'')+'</div>':'')\n    +'</div>'\n    +'<div class=\"cb\">'+(items?'<ul class=\"bl\">'+items+'</ul>':'<p class=\"nc\">No details.</p>')+'</div>'\n  +'</div>';\n}\n\nvar cards = sections.map(renderCard).join('');\n\nvar css = ':root{--bg:#07090f;--s0:rgba(255,255,255,.04);--s1:rgba(255,255,255,.08);--b0:rgba(255,255,255,.07);--b1:rgba(255,255,255,.13);--tx:#dde1e9;--mt:#6b7a90;--blue:#3b82f6;--pur:#a855f7;--grn:#10b981;--amb:#f59e0b}'\n+'*{box-sizing:border-box;margin:0;padding:0}html{scroll-behavior:smooth}'\n+'body{font-family:-apple-system,BlinkMacSystemFont,Segoe UI,system-ui,sans-serif;background:var(--bg);color:var(--tx);min-height:100vh;font-size:14px;line-height:1.6}'\n+'.hdr{position:sticky;top:0;z-index:100;background:rgba(7,9,15,.95);backdrop-filter:blur(20px);border-bottom:1px solid var(--b0);padding:0 28px}'\n+'.hi{display:flex;align-items:center;justify-content:space-between;height:58px;gap:16px}'\n+'.logo{display:flex;align-items:center;gap:10px;flex-shrink:0}'\n+'.lm{width:32px;height:32px;background:linear-gradient(135deg,#3b82f6,#8b5cf6);border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:17px}'\n+'.lt h1{font-size:15px;font-weight:700;letter-spacing:-.02em}.lt p{font-size:10px;color:var(--mt)}'\n+'.hc{flex:1;max-width:380px}'\n+'.sbx input{width:100%;padding:7px 12px 7px 14px;background:var(--s0);border:1px solid var(--b0);border-radius:8px;color:var(--tx);font-size:13px;outline:none;transition:all .2s}'\n+'.sbx input:focus{background:var(--s1);border-color:rgba(99,102,241,.5);box-shadow:0 0 0 3px rgba(99,102,241,.1)}'\n+'.sbx input::placeholder{color:var(--mt)}'\n+'.hr2{display:flex;align-items:center;gap:8px}'\n+'.upd{font-size:11px;color:var(--mt);padding:4px 10px;background:var(--s0);border:1px solid var(--b0);border-radius:6px;white-space:nowrap}'\n+'.btn{padding:6px 14px;border-radius:7px;border:none;cursor:pointer;font-size:12px;font-weight:500;transition:all .15s}'\n+'.btn-o{background:transparent;color:var(--mt);border:1px solid var(--b0)}.btn-o:hover{color:var(--tx);border-color:var(--b1)}'\n+'.btn-p{background:linear-gradient(135deg,#3b82f6,#6366f1);color:#fff;box-shadow:0 2px 8px rgba(99,102,241,.3)}.btn-p:hover{box-shadow:0 4px 16px rgba(99,102,241,.4);transform:translateY(-1px)}'\n+'.sw{padding:18px 28px 0}.sg{display:grid;grid-template-columns:repeat(5,1fr);gap:10px}'\n+'.sc{background:var(--s0);border:1px solid var(--b0);border-radius:10px;padding:14px 16px;cursor:pointer;transition:all .2s;position:relative;overflow:hidden}'\n+'.sc:hover{background:var(--s1);border-color:var(--b1);transform:translateY(-1px)}'\n+'.sv{font-size:26px;font-weight:700;line-height:1;margin-bottom:3px}.sl{font-size:10px;color:var(--mt);text-transform:uppercase;letter-spacing:.06em}'\n+'.si{position:absolute;right:12px;top:50%;transform:translateY(-50%);font-size:26px;opacity:.12}'\n+'.fw{padding:14px 28px}.fl{display:flex;gap:6px;align-items:center;flex-wrap:wrap}'\n+'.flbl{font-size:10px;color:var(--mt);text-transform:uppercase;letter-spacing:.06em;margin-right:4px}'\n+'.fp{display:inline-flex;align-items:center;gap:5px;padding:5px 14px;border-radius:20px;border:1px solid var(--b0);background:transparent;color:var(--mt);font-size:12px;font-weight:500;cursor:pointer;transition:all .2s}'\n+'.fp:hover{color:var(--tx);border-color:var(--b1);background:var(--s0)}'\n+'.fp.act{color:#fff;border-color:transparent}.fp .cnt{font-size:10px;background:rgba(255,255,255,.2);padding:0 5px;border-radius:8px;min-width:16px;text-align:center}'\n+'.fp.act.all{background:rgba(255,255,255,.1);color:var(--tx)}.fp.act.cl{background:#1d4ed8}.fp.act.tm{background:#7c3aed}.fp.act.pr{background:#047857}.fp.act.op{background:#92400e}'\n+'.main{padding:0 28px 48px}'\n+'.gh{display:flex;align-items:center;justify-content:space-between;margin-bottom:12px}'\n+'.ght{font-size:11px;font-weight:600;color:var(--mt);text-transform:uppercase;letter-spacing:.08em}'\n+'.ghc{font-size:11px;color:var(--mt)}'\n+'.grid{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;align-items:start}'\n+'@media(max-width:1100px){.grid{grid-template-columns:repeat(2,1fr)}.sg{grid-template-columns:repeat(3,1fr)}}'\n+'@media(max-width:700px){.grid{grid-template-columns:1fr}.sg{grid-template-columns:repeat(2,1fr)}.hi{flex-wrap:wrap;height:auto;padding:12px 0}.hc{max-width:100%;width:100%}}'\n+'.card{background:var(--s0);border:1px solid var(--b0);border-radius:12px;overflow:hidden;transition:all .2s;display:flex;flex-direction:column}'\n+'.card:hover{background:rgba(255,255,255,.06);box-shadow:0 0 0 1px var(--b1),0 8px 24px rgba(0,0,0,.4);transform:translateY(-1px)}'\n+'.card.hidden{display:none}'\n+'.ch{padding:13px 15px 11px;border-bottom:1px solid var(--b0)}'\n+'.cr{display:flex;align-items:flex-start;justify-content:space-between;gap:8px}'\n+'.ct{font-size:13px;font-weight:600;line-height:1.35;color:var(--tx)}'\n+'.badge{font-size:10px;font-weight:600;padding:2px 8px;border-radius:6px;white-space:nowrap;flex-shrink:0}'\n+'.arow{display:flex;align-items:center;gap:5px;font-size:11px;color:var(--amb);margin-top:5px}'\n+'.adot{width:5px;height:5px;border-radius:50%;background:var(--amb);animation:pu 2s ease infinite;flex-shrink:0}'\n+'@keyframes pu{0%,100%{opacity:1}50%{opacity:.2}}'\n+'.cb{padding:10px 15px 14px;flex:1}.bl{list-style:none;display:flex;flex-direction:column;gap:1px}'\n+'.bi{font-size:12px;color:var(--mt);line-height:1.6;padding:2px 0 2px 12px;position:relative;transition:color .15s}'\n+'.bi::before{content:\"-\";position:absolute;left:2px;color:var(--b1)}'\n+'.bi:hover{color:var(--tx)}.bs{padding-left:20px;font-size:11.5px;opacity:.8}.bs::before{content:\">\";left:10px;font-size:10px}'\n+'.ba{color:#fbbf24;background:rgba(251,191,36,.07);border-left:2px solid rgba(251,191,36,.35);padding-left:9px;border-radius:0 3px 3px 0;margin:2px 0}.ba::before{display:none}'\n+'.bi b{color:var(--tx);font-weight:600}.nc{font-size:11px;color:var(--mt);font-style:italic}'\n+'.nores{display:none;text-align:center;padding:60px;color:var(--mt)}.nores p{margin-top:10px;font-size:15px}'\n+'.footer{border-top:1px solid var(--b0);padding:14px 28px;display:flex;align-items:center;justify-content:space-between;font-size:11px;color:var(--mt)}'\n+'.footer a{color:var(--blue);text-decoration:none}.footer a:hover{text-decoration:underline}'\n+'.fr{display:flex;gap:14px}'\n+'::-webkit-scrollbar{width:4px}::-webkit-scrollbar-thumb{background:rgba(255,255,255,.12);border-radius:2px}'\n+'@media print{.hdr{position:static}.fw,.hr2{display:none}.card{break-inside:avoid}}';\n\nvar html = '<!DOCTYPE html><html lang=\"en\"><head>'\n+'<meta charset=\"UTF-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">'\n+'<title>Weekly Ops Dashboard</title>'\n+'<style>'+css+'</style></head><body>'\n+'<header class=\"hdr\"><div class=\"hi\">'\n+'<div class=\"logo\"><div class=\"lm\">&#x1F4CA;</div><div class=\"lt\"><h1>Weekly Operations Dashboard</h1><p>Service Push &middot; AI-Powered Ops Intelligence</p></div></div>'\n+'<div class=\"hc\"><div class=\"sbx\"><input type=\"text\" id=\"srch\" placeholder=\"Search sections, people, topics...\"></div></div>'\n+'<div class=\"hr2\"><span class=\"upd\">&#x1F550; '+dateStr+'</span>'\n+'<button class=\"btn btn-o\" onclick=\"window.print()\">Print</button>'\n+'<button class=\"btn btn-p\" onclick=\"location.reload()\">&#x21BB; Refresh</button></div>'\n+'</div></header>'\n+'<div class=\"sw\"><div class=\"sg\">'\n+'<div class=\"sc\" onclick=\"filterAll()\"><div class=\"sv\">'+total+'</div><div class=\"sl\">Total Sections</div><div class=\"si\">&#x1F4CB;</div></div>'\n+'<div class=\"sc\"><div class=\"sv\" style=\"color:#f59e0b\">'+actions+'</div><div class=\"sl\">Action Items</div><div class=\"si\">&#x26A1;</div></div>'\n+'<div class=\"sc\" onclick=\"filterCat(\\'cl\\')\"><div class=\"sv\" style=\"color:#3b82f6\">'+clients+'</div><div class=\"sl\">Clients</div><div class=\"si\">&#x1F3E2;</div></div>'\n+'<div class=\"sc\" onclick=\"filterCat(\\'tm\\')\"><div class=\"sv\" style=\"color:#a855f7\">'+team+'</div><div class=\"sl\">Team</div><div class=\"si\">&#x1F465;</div></div>'\n+'<div class=\"sc\" onclick=\"filterCat(\\'op\\')\"><div class=\"sv\" style=\"color:#f59e0b\">'+ops+'</div><div class=\"sl\">Operations</div><div class=\"si\">&#x2699;</div></div>'\n+'</div></div>'\n+'<div class=\"fw\"><div class=\"fl\"><span class=\"flbl\">Filter:</span>'\n+'<button class=\"fp act all\" data-c=\"all\">All <span class=\"cnt\">'+total+'</span></button>'\n+'<button class=\"fp cl\" data-c=\"cl\">&#x1F3E2; Clients <span class=\"cnt\">'+clients+'</span></button>'\n+'<button class=\"fp tm\" data-c=\"tm\">&#x1F465; Team <span class=\"cnt\">'+team+'</span></button>'\n+'<button class=\"fp pr\" data-c=\"pr\">&#x1F916; Product <span class=\"cnt\">'+product+'</span></button>'\n+'<button class=\"fp op\" data-c=\"op\">&#x2699; Operations <span class=\"cnt\">'+ops+'</span></button>'\n+'</div></div>'\n+'<main class=\"main\">'\n+'<div class=\"gh\"><span class=\"ght\">All Sections</span><span class=\"ghc\" id=\"clbl\">'+total+' sections</span></div>'\n+'<div class=\"grid\" id=\"grid\">'+cards+'</div>'\n+'<div class=\"nores\" id=\"nores\"><div style=\"font-size:40px\">&#x1F50D;</div><p>No sections match</p></div>'\n+'</main>'\n+'<footer class=\"footer\">'\n+'<span>&#x1F4C4; <a href=\"'+docLink+'\" target=\"_blank\" rel=\"noopener\">7 Day Recap &mdash; Google Docs</a></span>'\n+'<div class=\"fr\"><span>Powered by n8n &amp; Google Drive</span><span>'+dateStr+' &middot; '+timeStr+'</span></div>'\n+'</footer>'\n+'<script>'\n+'var curC=\"all\",curQ=\"\",allCards=Array.from(document.querySelectorAll(\".card\")),nores=document.getElementById(\"nores\"),clbl=document.getElementById(\"clbl\");'\n+'function go(){var vis=0;allCards.forEach(function(c){var ok=(curC===\"all\"||c.dataset.c===curC)&&(!curQ||c.textContent.toLowerCase().indexOf(curQ)>=0);c.classList.toggle(\"hidden\",!ok);if(ok)vis++;});nores.style.display=vis===0?\"block\":\"none\";clbl.textContent=vis+\" section\"+(vis!==1?\"s\":\"\");}'\n+'function setF(el,c){document.querySelectorAll(\".fp\").forEach(function(p){p.classList.remove(\"act\");});el.classList.add(\"act\");curC=c;go();}'\n+'function filterAll(){setF(document.querySelector(\".fp.all\"),\"all\");}'\n+'function filterCat(c){setF(document.querySelector(\".fp.\"+c),c);}'\n+'document.querySelectorAll(\".fp\").forEach(function(p){p.addEventListener(\"click\",function(){setF(p,p.dataset.c);});});'\n+'document.getElementById(\"srch\").addEventListener(\"input\",function(e){curQ=e.target.value.toLowerCase().trim();go();});'\n+'<\\/script></body></html>';\n\nreturn [{json:{html:html}}];"
+        "jsCode": "var docText = $input.first().json.data || '';\n\nvar systemPrompt = 'You are an operations intelligence AI for Service Push, a consulting company. Analyze weekly ops recaps and extract structured data. Return ONLY valid JSON, no markdown, no explanation.';\n\nvar userPrompt = 'Analyze this weekly operations recap and return structured JSON in EXACTLY this format with no extra text:\\n{\\n  \"ai_summary\": \"2-3 sentence CEO-level summary of week health\",\\n  \"week_signal\": \"positive|neutral|negative|critical\",\\n  \"top_blockers\": [\"brief blocker description\"],\\n  \"overloaded_team\": [\"Full Name\"],\\n  \"metrics\": {\"critical\": 0, \"at_risk\": 0, \"blocked\": 0, \"completed\": 0},\\n  \"items\": [{\\n    \"title\": \"Short actionable title max 55 chars\",\\n    \"status\": \"critical|in_progress|blocked|completed\",\\n    \"priority\": \"high|medium|low\",\\n    \"owner\": \"Full Name or null\",\\n    \"client\": \"Client name or null\",\\n    \"section\": \"Section heading\",\\n    \"summary\": \"1-2 sentence description\",\\n    \"next_step\": \"Specific next action or null\",\\n    \"tags\": []\\n  }]\\n}\\nValid tags: blocker, revenue_risk, client_risk, overdue, needs_review\\nStatus rules: critical=urgent blocking issue, in_progress=actively worked, blocked=waiting on external, completed=done this week\\n\\nDOCUMENT:\\n' + docText.slice(0, 11000);\n\nreturn [{\n  json: {\n    model: 'claude-haiku-4-5-20251001',\n    max_tokens: 4000,\n    system: systemPrompt,\n    messages: [{ role: 'user', content: userPrompt }]\n  }\n}];"
       },
       "id": "b2000001-0000-4000-8000-000000000005",
+      "name": "Prepare AI Request",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [960, 300]
+    },
+    {
+      "parameters": {
+        "url": "https://api.anthropic.com/v1/messages",
+        "method": "POST",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "x-api-key", "value": "={{ $env.ANTHROPIC_API_KEY }}" },
+            { "name": "anthropic-version", "value": "2023-06-01" },
+            { "name": "content-type", "value": "application/json" }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify($json) }}",
+        "options": {}
+      },
+      "id": "b2000001-0000-4000-8000-000000000006",
+      "name": "Analyze with Claude",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1200, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "var claudeResp = $input.first().json;\nvar info = $('Sort and Pick Most Recent').first().json;\n\nfunction esc(s){ return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }\n\n// Parse Claude response with fallback\nvar data = {ai_summary:'Analysis unavailable.',week_signal:'neutral',metrics:{critical:0,at_risk:0,blocked:0,completed:0},items:[],top_blockers:[],overloaded_team:[]};\ntry {\n  var txt = claudeResp.content && claudeResp.content[0] ? claudeResp.content[0].text : '{}';\n  txt = txt.replace(/^```json\\s*/i,'').replace(/```\\s*$/,'').trim();\n  data = JSON.parse(txt);\n} catch(e) { /* use fallback */ }\n\nvar items = data.items || [];\nvar metrics = data.metrics || {};\nvar d = new Date(info.modifiedTime || info.createdTime || Date.now());\nvar dateStr = d.toLocaleDateString('en-US',{weekday:'long',month:'long',day:'numeric',year:'numeric'});\nvar timeStr = d.toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',timeZoneName:'short'});\nvar docLink = esc(info.webViewLink || '#');\n\n// Group items by status\nvar groups = {critical:[],in_progress:[],blocked:[],completed:[]};\nitems.forEach(function(item){\n  var s = item.status || 'in_progress';\n  if(groups[s]) groups[s].push(item);\n  else groups.in_progress.push(item);\n});\n\n// Unique owners for filter dropdown\nvar owners = [];\nitems.forEach(function(item){\n  if(item.owner && owners.indexOf(item.owner) === -1) owners.push(item.owner);\n});\nowners.sort();\n\nvar signalMap = {positive:'&#x1F7E2;',neutral:'&#x1F7E1;',negative:'&#x1F534;',critical:'&#x1F6A8;'};\nvar signalLabel = {positive:'On Track',neutral:'Neutral',negative:'Needs Attention',critical:'Critical Week'};\nvar signal = data.week_signal || 'neutral';\n\nfunction renderPriority(p){\n  if(p==='high') return '<span class=\"pbadge ph\">&#x1F534; HIGH</span>';\n  if(p==='medium') return '<span class=\"pbadge pm\">&#x1F7E1; MED</span>';\n  return '<span class=\"pbadge pl\">&#x1F7E2; LOW</span>';\n}\n\nfunction renderTags(tags){\n  if(!tags||!tags.length) return '';\n  var m={blocker:'<span class=\"tag tb\">&#x26D4; Blocker</span>',revenue_risk:'<span class=\"tag tr2\">&#x1F4B0; Revenue Risk</span>',client_risk:'<span class=\"tag tc\">&#x1F6A8; Client Risk</span>',overdue:'<span class=\"tag to\">&#x23F0; Overdue</span>',needs_review:'<span class=\"tag tnr\">&#x1F440; Needs Review</span>'};\n  return tags.map(function(t){return m[t]||'';}).join('');\n}\n\nfunction renderCard(item){\n  var p = item.priority||'medium';\n  var s = item.status||'in_progress';\n  var ownerVal = esc(item.owner||'');\n  var clientVal = esc(item.client||'');\n  var ownerAttr = item.owner?'<span class=\"attr\"><span class=\"ai2\">&#x1F464;</span>'+ownerVal+'</span>':'';\n  var clientAttr = item.client?'<span class=\"attr\"><span class=\"ai2\">&#x1F3E2;</span>'+clientVal+'</span>':'';\n  var next = item.next_step?'<div class=\"nxt\"><span class=\"narr\">&#x2192;</span>'+esc(item.next_step)+'</div>':'';\n  var tags = renderTags(item.tags);\n  return '<div class=\"icard pr-'+p+' st-'+s+'\" data-owner=\"'+ownerVal+'\" data-priority=\"'+p+'\" data-status=\"'+s+'\">'\n    +'<div class=\"ictop\">'+renderPriority(p)+(item.section?'<span class=\"icsec\">'+esc(item.section)+'</span>':'')+'</div>'\n    +'<h3 class=\"ict\">'+esc(item.title)+'</h3>'\n    +(item.summary?'<p class=\"ics\">'+esc(item.summary)+'</p>':'')\n    +'<div class=\"icattrs\">'+ownerAttr+clientAttr+'</div>'\n    +next\n    +(tags?'<div class=\"ictags\">'+tags+'</div>':'')\n  +'</div>';\n}\n\nfunction renderGroup(title,icon,grpItems,id,open){\n  if(!grpItems.length) return '';\n  var cards = grpItems.map(renderCard).join('');\n  return '<div class=\"grp\">'\n    +'<div class=\"gh\" onclick=\"tog(\\''+id+'\\')\">'\n      +'<div class=\"ghl\">'+icon+' <span class=\"ghtitle\">'+title+'</span><span class=\"ghcnt\">'+grpItems.length+'</span></div>'\n      +'<span id=\"gt-'+id+'\">'+(open?'&#x25BC;':'&#x25B6;')+'</span>'\n    +'</div>'\n    +'<div class=\"gc\" id=\"gc-'+id+'\" style=\"display:'+(open?'grid':'none')+'\">'+cards+'</div>'\n  +'</div>';\n}\n\nvar groupsHtml = ''\n  + renderGroup('Critical Issues','&#x1F6A8;',groups.critical,'crit',true)\n  + renderGroup('Blocked / Waiting','&#x23F3;',groups.blocked,'blk',true)\n  + renderGroup('In Progress','&#x2699;',groups.in_progress,'prog',true)\n  + renderGroup('Completed This Week','&#x2705;',groups.completed,'done',false);\n\nvar ownerOpts = '<option value=\"\">All Owners</option>'\n  + owners.map(function(o){return '<option value=\"'+esc(o)+'\">'+esc(o)+'</option>';}).join('');\n\nvar blockersHtml = (data.top_blockers||[]).slice(0,5).map(function(b,i){\n  return '<div class=\"bitem\"><span class=\"bnum\">'+(i+1)+'</span>'+esc(b)+'</div>';\n}).join('');\n\nvar overloadedHtml = (data.overloaded_team||[]).map(function(n){\n  return '<span class=\"olbadge\">&#x26A0; '+esc(n)+'</span>';\n}).join('');\n\nvar critN = metrics.critical || groups.critical.length;\nvar blkN = metrics.blocked || groups.blocked.length;\nvar riskN = metrics.at_risk || 0;\nvar progN = groups.in_progress.length;\nvar doneN = metrics.completed || groups.completed.length;\n\nvar css = ':root{--bg:#07090f;--s0:rgba(255,255,255,.04);--s1:rgba(255,255,255,.08);--b0:rgba(255,255,255,.07);--b1:rgba(255,255,255,.14);--tx:#dde1e9;--mt:#6b7a90;--red:#ef4444;--amb:#f59e0b;--blue:#3b82f6;--grn:#22c55e;--org:#f97316}'\n+'*{box-sizing:border-box;margin:0;padding:0}html{scroll-behavior:smooth}'\n+'body{font-family:-apple-system,BlinkMacSystemFont,Segoe UI,system-ui,sans-serif;background:var(--bg);color:var(--tx);min-height:100vh;line-height:1.6;font-size:14px}'\n+'.hdr{position:sticky;top:0;z-index:100;background:rgba(7,9,15,.96);backdrop-filter:blur(20px);border-bottom:1px solid var(--b0)}'\n+'.hi{display:flex;align-items:center;gap:12px;padding:0 24px;height:52px}'\n+'.logo{display:flex;align-items:center;gap:9px;flex-shrink:0}'\n+'.lm{width:30px;height:30px;background:linear-gradient(135deg,#3b82f6,#8b5cf6);border-radius:7px;display:flex;align-items:center;justify-content:center;font-size:16px}'\n+'.lt h1{font-size:14px;font-weight:700;letter-spacing:-.02em}'\n+'.lt p{font-size:10px;color:var(--mt)}'\n+'.hdiv{width:1px;height:22px;background:var(--b0);flex-shrink:0}'\n+'.sbx{flex:1;max-width:320px}'\n+'.sbx input{width:100%;padding:6px 12px;background:var(--s0);border:1px solid var(--b0);border-radius:7px;color:var(--tx);font-size:12px;outline:none;transition:all .2s}'\n+'.sbx input:focus{background:var(--s1);border-color:rgba(99,102,241,.5)}'\n+'.sbx input::placeholder{color:var(--mt)}'\n+'.hright{display:flex;align-items:center;gap:8px;margin-left:auto}'\n+'.upd{font-size:11px;color:var(--mt);white-space:nowrap}'\n+'.btn{padding:5px 12px;border-radius:6px;border:none;cursor:pointer;font-size:12px;font-weight:500;transition:all .15s}'\n+'.bto{background:transparent;color:var(--mt);border:1px solid var(--b0)}.bto:hover{color:var(--tx)}'\n+'.btp{background:linear-gradient(135deg,#3b82f6,#6366f1);color:#fff}.btp:hover{filter:brightness(1.1)}'\n+'.aibanner{margin:14px 24px;border-radius:12px;background:linear-gradient(135deg,rgba(99,102,241,.12),rgba(139,92,246,.08));border:1px solid rgba(99,102,241,.22);padding:14px 18px;display:flex;align-items:flex-start;gap:14px}'\n+'.aico{width:36px;height:36px;background:linear-gradient(135deg,#6366f1,#8b5cf6);border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:18px;flex-shrink:0}'\n+'.aicont{flex:1}'\n+'.ailbl{font-size:10px;font-weight:700;color:#a78bfa;text-transform:uppercase;letter-spacing:.08em;margin-bottom:4px}'\n+'.aitxt{font-size:13px;color:var(--tx);line-height:1.55}'\n+'.airight{display:flex;flex-direction:column;align-items:flex-end;gap:6px;flex-shrink:0}'\n+'.sigbadge{display:inline-flex;align-items:center;gap:5px;padding:4px 10px;border-radius:20px;font-size:11px;font-weight:600;background:rgba(255,255,255,.08);border:1px solid var(--b0)}'\n+'.olbadge{display:inline-flex;align-items:center;gap:4px;font-size:11px;color:#fcd34d;background:rgba(245,158,11,.12);padding:2px 8px;border-radius:5px;margin:2px}'\n+'.statsrow{display:grid;grid-template-columns:repeat(5,1fr);gap:8px;padding:0 24px 12px}'\n+'.sc{background:var(--s0);border:1px solid var(--b0);border-radius:9px;padding:12px 14px;cursor:pointer;transition:all .2s;text-align:center;position:relative;overflow:hidden}'\n+'.sc:hover{background:var(--s1);transform:translateY(-1px);border-color:var(--b1)}'\n+'.sn{font-size:24px;font-weight:700;margin-bottom:2px}'\n+'.sl2{font-size:10px;color:var(--mt);text-transform:uppercase;letter-spacing:.05em}'\n+'.frow{padding:0 24px 12px;display:flex;gap:8px;align-items:center;flex-wrap:wrap}'\n+'.flab{font-size:10px;color:var(--mt);text-transform:uppercase;letter-spacing:.06em}'\n+'.fpill{padding:4px 12px;border-radius:16px;border:1px solid var(--b0);background:transparent;color:var(--mt);font-size:11px;font-weight:500;cursor:pointer;transition:all .2s}'\n+'.fpill:hover{color:var(--tx);border-color:var(--b1)}'\n+'.fpill.act{color:#fff;border-color:transparent}'\n+'.fpill.act.all{background:rgba(255,255,255,.1);color:var(--tx)}'\n+'.fpill.act.high{background:#991b1b}.fpill.act.medium{background:#92400e}.fpill.act.low{background:#14532d}'\n+'.fsel{padding:5px 10px;background:var(--s0);border:1px solid var(--b0);border-radius:7px;color:var(--tx);font-size:12px;outline:none;cursor:pointer}'\n+'.fsel option{background:#111318}'\n+'.blkbar{margin:0 24px 12px;border-radius:10px;background:rgba(239,68,68,.07);border:1px solid rgba(239,68,68,.2);padding:12px 16px}'\n+'.blktitle{font-size:11px;font-weight:700;color:var(--red);text-transform:uppercase;letter-spacing:.07em;margin-bottom:8px}'\n+'.bitem{display:flex;align-items:baseline;gap:8px;font-size:12px;color:#fca5a5;padding:3px 0;line-height:1.4}'\n+'.bnum{width:16px;height:16px;background:rgba(239,68,68,.3);border-radius:50%;display:inline-flex;align-items:center;justify-content:center;font-size:9px;font-weight:700;flex-shrink:0}'\n+'.main{padding:0 24px 48px}'\n+'.grp{margin-bottom:16px}'\n+'.gh{display:flex;align-items:center;justify-content:space-between;padding:9px 14px;background:var(--s0);border:1px solid var(--b0);border-radius:9px;cursor:pointer;user-select:none;transition:background .2s}'\n+'.gh:hover{background:var(--s1)}'\n+'.ghl{display:flex;align-items:center;gap:8px;font-size:13px;font-weight:600}'\n+'.ghcnt{background:var(--b0);padding:1px 8px;border-radius:10px;font-size:11px}'\n+'.gc{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-top:10px}'\n+'@media(max-width:1100px){.gc{grid-template-columns:repeat(2,1fr)}.statsrow{grid-template-columns:repeat(3,1fr)}}'\n+'@media(max-width:700px){.gc{grid-template-columns:1fr}.statsrow{grid-template-columns:repeat(3,1fr)}.hi{flex-wrap:wrap;height:auto;padding:8px 16px}.sbx{max-width:100%;width:100%}}'\n+'.icard{background:var(--s0);border:1px solid var(--b0);border-radius:10px;padding:13px;transition:all .2s;display:flex;flex-direction:column;gap:7px}'\n+'.icard:hover{background:var(--s1);box-shadow:0 4px 20px rgba(0,0,0,.3);transform:translateY(-1px)}'\n+'.icard.hidden{display:none}'\n+'.icard.pr-high{border-left:3px solid var(--red)}'\n+'.icard.pr-medium{border-left:3px solid var(--amb)}'\n+'.icard.pr-low{border-left:3px solid var(--grn)}'\n+'.icard.st-critical{background:rgba(239,68,68,.05)}'\n+'.icard.st-blocked{background:rgba(249,115,22,.04)}'\n+'.ictop{display:flex;align-items:center;justify-content:space-between;gap:6px}'\n+'.icsec{font-size:10px;color:var(--mt);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:120px}'\n+'.ict{font-size:13px;font-weight:600;color:var(--tx);line-height:1.35}'\n+'.ics{font-size:11.5px;color:var(--mt);line-height:1.55}'\n+'.icattrs{display:flex;gap:10px;flex-wrap:wrap}'\n+'.attr{display:inline-flex;align-items:center;gap:4px;font-size:11px;color:var(--mt)}'\n+'.ai2{font-size:12px}'\n+'.nxt{font-size:11.5px;color:#93c5fd;display:flex;align-items:flex-start;gap:5px}'\n+'.narr{color:#60a5fa;flex-shrink:0}'\n+'.ictags{display:flex;gap:5px;flex-wrap:wrap}'\n+'.tag{font-size:10px;font-weight:600;padding:2px 7px;border-radius:5px}'\n+'.tb{background:rgba(239,68,68,.15);color:#fca5a5}'\n+'.tr2{background:rgba(34,197,94,.12);color:#86efac}'\n+'.tc{background:rgba(245,158,11,.12);color:#fcd34d}'\n+'.to{background:rgba(249,115,22,.12);color:#fdba74}'\n+'.tnr{background:rgba(139,92,246,.12);color:#c4b5fd}'\n+'.pbadge{font-size:10px;font-weight:700;padding:2px 7px;border-radius:5px;letter-spacing:.03em;white-space:nowrap}'\n+'.ph{background:rgba(239,68,68,.18);color:#fca5a5}'\n+'.pm{background:rgba(245,158,11,.18);color:#fcd34d}'\n+'.pl{background:rgba(34,197,94,.18);color:#86efac}'\n+'.nores{display:none;text-align:center;padding:48px;color:var(--mt)}'\n+'.footer{border-top:1px solid var(--b0);padding:14px 24px;display:flex;align-items:center;justify-content:space-between;font-size:11px;color:var(--mt)}'\n+'.footer a{color:var(--blue);text-decoration:none}.footer a:hover{text-decoration:underline}'\n+'::-webkit-scrollbar{width:4px}::-webkit-scrollbar-thumb{background:rgba(255,255,255,.1);border-radius:2px}'\n+'@media print{.hdr{position:static}.frow,.hright{display:none}}';\n\nvar html = '<!DOCTYPE html><html lang=\"en\"><head>'\n+'<meta charset=\"UTF-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">'\n+'<title>Ops Command Center &middot; Service Push</title>'\n+'<style>'+css+'</style></head><body>'\n+'<header class=\"hdr\"><div class=\"hi\">'\n+'<div class=\"logo\"><div class=\"lm\">&#x1F4CA;</div><div class=\"lt\"><h1>Weekly Ops Command Center</h1><p>Service Push &middot; AI-Powered</p></div></div>'\n+'<div class=\"hdiv\"></div>'\n+'<div class=\"sbx\"><input type=\"text\" id=\"srch\" placeholder=\"Search items, owners, clients...\"></div>'\n+'<div class=\"hright\"><span class=\"upd\">'+dateStr+'</span>'\n+'<button class=\"btn bto\" onclick=\"window.print()\">Print</button>'\n+'<button class=\"btn btp\" onclick=\"location.reload()\">&#x21BB; Refresh</button>'\n+'</div></div></header>'\n\n+'<div class=\"aibanner\">'\n+'<div class=\"aico\">&#x1F9E0;</div>'\n+'<div class=\"aicont\"><div class=\"ailbl\">&#x2728; AI Weekly Intelligence</div>'\n+'<div class=\"aitxt\">'+esc(data.ai_summary)+'</div></div>'\n+'<div class=\"airight\">'\n+'<span class=\"sigbadge\">'+(signalMap[signal]||'&#x1F7E1;')+' '+(signalLabel[signal]||'Neutral')+'</span>'\n+(overloadedHtml?'<div style=\"font-size:11px;color:var(--amb)\">&#x26A0; Overloaded: '+overloadedHtml+'</div>':'')\n+'</div></div>'\n\n+'<div class=\"statsrow\">'\n+'<div class=\"sc\" onclick=\"filterSt(\\'critical\\')\"><div class=\"sn\" style=\"color:var(--red)\">'+critN+'</div><div class=\"sl2\">&#x1F6A8; Critical</div></div>'\n+'<div class=\"sc\" onclick=\"filterSt(\\'blocked\\')\"><div class=\"sn\" style=\"color:var(--org)\">'+blkN+'</div><div class=\"sl2\">&#x23F3; Blocked</div></div>'\n+'<div class=\"sc\"><div class=\"sn\" style=\"color:var(--amb)\">'+riskN+'</div><div class=\"sl2\">&#x26A0; At Risk</div></div>'\n+'<div class=\"sc\" onclick=\"filterSt(\\'in_progress\\')\"><div class=\"sn\" style=\"color:var(--blue)\">'+progN+'</div><div class=\"sl2\">&#x2699; In Progress</div></div>'\n+'<div class=\"sc\" onclick=\"filterSt(\\'completed\\')\"><div class=\"sn\" style=\"color:var(--grn)\">'+doneN+'</div><div class=\"sl2\">&#x2705; Completed</div></div>'\n+'</div>'\n\n+'<div class=\"frow\">'\n+'<span class=\"flab\">Priority:</span>'\n+'<button class=\"fpill act all\" data-p=\"all\">All</button>'\n+'<button class=\"fpill high\" data-p=\"high\">&#x1F534; High</button>'\n+'<button class=\"fpill medium\" data-p=\"medium\">&#x1F7E1; Medium</button>'\n+'<button class=\"fpill low\" data-p=\"low\">&#x1F7E2; Low</button>'\n+'<div class=\"hdiv\"></div>'\n+'<span class=\"flab\">Owner:</span>'\n+'<select class=\"fsel\" id=\"ownersel\"><option value=\"\">All Owners</option>'+ownerOpts+'</select>'\n+'</div>'\n\n+(blockersHtml?'<div class=\"blkbar\"><div class=\"blktitle\">&#x1F6AB; Top Blockers Requiring Attention</div>'+blockersHtml+'</div>':'')\n\n+'<main class=\"main\"><div id=\"allgrps\">'+groupsHtml+'</div>'\n+'<div class=\"nores\" id=\"nores\"><div style=\"font-size:36px\">&#x1F50D;</div><p style=\"margin-top:8px\">No items match your filters</p></div>'\n+'</main>'\n\n+'<footer class=\"footer\">'\n+'<span>&#x1F4C4; <a href=\"'+docLink+'\" target=\"_blank\" rel=\"noopener\">7 Day Recap &mdash; Google Docs</a></span>'\n+'<span>Powered by n8n &amp; Claude AI &middot; '+dateStr+' &middot; '+timeStr+'</span>'\n+'</footer>'\n\n+'<script>'\n+'var curP=\"all\",curSt=\"all\",allCards=Array.from(document.querySelectorAll(\".icard\")),nores=document.getElementById(\"nores\");'\n+'function go(){'\n+'var q=document.getElementById(\"srch\").value.toLowerCase().trim();'\n+'var ow=document.getElementById(\"ownersel\").value;'\n+'var vis=0;'\n+'allCards.forEach(function(c){'\n+'var ok=(curP===\"all\"||c.dataset.priority===curP)&&(curSt===\"all\"||c.dataset.status===curSt)&&(!ow||c.dataset.owner===ow)&&(!q||c.textContent.toLowerCase().indexOf(q)>=0);'\n+'c.classList.toggle(\"hidden\",!ok);if(ok)vis++;'\n+'});'\n+'nores.style.display=vis===0?\"block\":\"none\";'\n+'}'\n+'function filterSt(s){curSt=s;curP=\"all\";document.querySelectorAll(\".fpill\").forEach(function(p){p.classList.remove(\"act\");});document.querySelector(\".fpill.all\").classList.add(\"act\");go();}'\n+'document.querySelectorAll(\".fpill\").forEach(function(p){'\n+'p.addEventListener(\"click\",function(){document.querySelectorAll(\".fpill\").forEach(function(x){x.classList.remove(\"act\");});p.classList.add(\"act\");curP=p.dataset.p;curSt=\"all\";go();});'\n+'});'\n+'document.getElementById(\"srch\").addEventListener(\"input\",go);'\n+'document.getElementById(\"ownersel\").addEventListener(\"change\",go);'\n+'function tog(id){var gc=document.getElementById(\"gc-\"+id),gt=document.getElementById(\"gt-\"+id);if(!gc||!gt)return;if(gc.style.display===\"none\"){gc.style.display=\"grid\";gt.innerHTML=\"&#x25BC;\";}else{gc.style.display=\"none\";gt.innerHTML=\"&#x25B6;\";}}'  \n+'<\\/script></body></html>';\n\nreturn [{json:{html:html}}];"
+      },
+      "id": "b2000001-0000-4000-8000-000000000007",
       "name": "Generate Dashboard HTML",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [
-        960,
-        300
-      ]
+      "position": [1440, 300]
     },
     {
       "parameters": {
@@ -135,105 +133,44 @@
           "responseCode": 200,
           "responseHeaders": {
             "entries": [
-              {
-                "name": "Content-Type",
-                "value": "text/html; charset=utf-8"
-              },
-              {
-                "name": "Cache-Control",
-                "value": "no-cache, no-store, must-revalidate"
-              },
-              {
-                "name": "X-Content-Type-Options",
-                "value": "nosniff"
-              }
+              { "name": "Content-Type", "value": "text/html; charset=utf-8" },
+              { "name": "Cache-Control", "value": "no-cache, no-store, must-revalidate" }
             ]
           }
         }
       },
-      "id": "b2000001-0000-4000-8000-000000000006",
+      "id": "b2000001-0000-4000-8000-000000000008",
       "name": "Return HTML Page",
       "type": "n8n-nodes-base.respondToWebhook",
       "typeVersion": 1.1,
-      "position": [
-        1200,
-        300
-      ]
+      "position": [1680, 300]
     }
   ],
   "connections": {
     "Webhook": {
-      "main": [
-        [
-          {
-            "node": "Search Google Drive",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
+      "main": [[{ "node": "Search Google Drive", "type": "main", "index": 0 }]]
     },
     "Search Google Drive": {
-      "main": [
-        [
-          {
-            "node": "Sort and Pick Most Recent",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
+      "main": [[{ "node": "Sort and Pick Most Recent", "type": "main", "index": 0 }]]
     },
     "Sort and Pick Most Recent": {
-      "main": [
-        [
-          {
-            "node": "Export Doc as Plain Text",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
+      "main": [[{ "node": "Export Doc as Plain Text", "type": "main", "index": 0 }]]
     },
     "Export Doc as Plain Text": {
-      "main": [
-        [
-          {
-            "node": "Generate Dashboard HTML",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
+      "main": [[{ "node": "Prepare AI Request", "type": "main", "index": 0 }]]
+    },
+    "Prepare AI Request": {
+      "main": [[{ "node": "Analyze with Claude", "type": "main", "index": 0 }]]
+    },
+    "Analyze with Claude": {
+      "main": [[{ "node": "Generate Dashboard HTML", "type": "main", "index": 0 }]]
     },
     "Generate Dashboard HTML": {
-      "main": [
-        [
-          {
-            "node": "Return HTML Page",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
+      "main": [[{ "node": "Return HTML Page", "type": "main", "index": 0 }]]
     }
   },
-  "settings": {
-    "executionOrder": "v1"
-  },
+  "settings": { "executionOrder": "v1" },
   "staticData": null,
-  "tags": [
-    {
-      "name": "dashboard"
-    },
-    {
-      "name": "google-drive"
-    },
-    {
-      "name": "weekly-recap"
-    }
-  ],
-  "meta": {
-    "templateId": "weekly-ops-dashboard-v1"
-  }
+  "tags": [{ "name": "dashboard" }, { "name": "google-drive" }, { "name": "weekly-recap" }],
+  "meta": { "templateId": "weekly-ops-dashboard-v2" }
 }
